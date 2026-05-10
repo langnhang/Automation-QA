@@ -1,0 +1,155 @@
+name: Deploy Test Dashboard
+
+on:
+  workflow_run:
+    workflows: ["CI Automation Tests", "Smoke Tests", "Scheduled Regression Tests"]
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  actions: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download artifacts from triggering workflow
+      if: github.event_name == 'workflow_run'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            run_id: context.payload.workflow_run.id,
+          });
+
+          const fs = require('fs');
+          const path = require('path');
+
+          // Download all test-results artifacts
+          for (const artifact of artifacts.data.artifacts) {
+            if (artifact.name.startsWith('test-results-')) {
+              console.log(`Downloading artifact: ${artifact.name}`);
+              const download = await github.rest.actions.downloadArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+                archive_format: 'zip',
+              });
+
+              fs.mkdirSync('artifacts', { recursive: true });
+              fs.writeFileSync(`artifacts/${artifact.name}.zip`, Buffer.from(download.data));
+            }
+          }
+
+    - name: Extract artifacts
+      if: github.event_name == 'workflow_run'
+      run: |
+        mkdir -p reports/history
+        if [ -d "artifacts" ]; then
+          cd artifacts
+          for zip in *.zip; do
+            if [ -f "$zip" ]; then
+              echo "Extracting $zip"
+              unzip -o "$zip" -d temp_extract/
+
+              # Handle nested reports structure
+              if [ -d "temp_extract/reports/history" ]; then
+                cp -r temp_extract/reports/history/* ../reports/history/ 2>/dev/null || true
+              fi
+
+              # Copy HTML reports
+              if [ -d "temp_extract/reports" ]; then
+                cp temp_extract/reports/*.html ../reports/ 2>/dev/null || true
+              fi
+
+              # Copy screenshots if exist
+              if [ -d "temp_extract/screenshots" ]; then
+                mkdir -p ../screenshots
+                cp -r temp_extract/screenshots/* ../screenshots/ 2>/dev/null || true
+              fi
+
+              rm -rf temp_extract
+            fi
+          done
+          cd ..
+        fi
+
+        echo "Reports structure:"
+        ls -la reports/
+        echo "History files:"
+        ls -la reports/history/ 2>/dev/null || echo "No history files"
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Generate static dashboard
+      run: |
+        pip install flask
+
+        # Create static HTML dashboard
+        mkdir -p _site
+
+        # Copy dashboard template
+        cp dashboard/templates/dashboard.html _site/index.html
+
+        # Merge history files from downloaded artifacts
+        if [ -d "reports/history" ]; then
+          mkdir -p _site/api
+
+          # Merge all run files using Python script
+          python3 .github/scripts/merge_history.py
+
+          # Copy individual run files
+          for file in reports/history/*.json; do
+            if [ -f "$file" ] && [ "$(basename $file)" != "index.json" ]; then
+              run_id=$(basename "$file" .json)
+              cp "$file" "_site/api/run_${run_id}.json"
+            fi
+          done
+        else
+          mkdir -p _site/api
+          echo "[]" > _site/api/runs.json
+        fi
+
+        # Update API paths in HTML for static hosting
+        sed -i "s|'/api/runs'|'./api/runs.json'|g" _site/index.html
+        sed -i "s|'/api/run/'+runId|'./api/run_'+runId+'.json'|g" _site/index.html
+
+        # Copy HTML reports if they exist
+        if [ -d "reports" ]; then
+          mkdir -p _site/reports
+          cp reports/*.html _site/reports/ 2>/dev/null || true
+        fi
+
+        echo "Dashboard generated successfully"
+        ls -la _site/
+        ls -la _site/api/ 2>/dev/null || echo "No API files"
+
+    - name: Setup Pages
+      uses: actions/configure-pages@v4
+
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: '_site'
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
+
+    - name: Output dashboard URL
+      run: |
+        echo "📊 Dashboard deployed to: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"

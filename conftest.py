@@ -4,6 +4,7 @@ import os
 import json
 import uuid
 import pytest
+import shutil
 
 from datetime import datetime
 
@@ -210,7 +211,15 @@ def pytest_sessionfinish(session, exitstatus):
     if not _results:
         return
 
-    os.makedirs("reports/history", exist_ok=True)
+    # =====================================================
+    # CLEAR OLD HISTORY - START FRESH
+    # =====================================================
+    
+    history_dir = "reports/history"
+    if os.path.exists(history_dir):
+        shutil.rmtree(history_dir)
+    
+    os.makedirs(history_dir, exist_ok=True)
 
     # =====================================================
     # SUMMARY
@@ -291,28 +300,13 @@ def pytest_sessionfinish(session, exitstatus):
         )
 
     # =====================================================
-    # UPDATE INDEX
+    # UPDATE INDEX - FRESH START
     # =====================================================
 
     index_path = "reports/history/index.json"
 
-    index = []
-
-    if os.path.exists(index_path):
-
-        try:
-            with open(
-                index_path,
-                "r",
-                encoding="utf-8"
-            ) as f:
-
-                index = json.load(f)
-
-        except Exception:
-            index = []
-
-    index.insert(0, {
+    # Always create fresh index (don't append to old one)
+    index = [{
         "run_id": RUN_ID,
         "date": run_data["date"],
         "total": total,
@@ -324,7 +318,7 @@ def pytest_sessionfinish(session, exitstatus):
         "duration": total_duration,
         "pass_rate": pass_rate,
         "file": report_path,
-    })
+    }]
 
     with open(
         index_path,

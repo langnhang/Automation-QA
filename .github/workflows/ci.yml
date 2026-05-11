@@ -8,7 +8,7 @@ on:
   schedule:
     - cron: '0 2 * * *'  # Run daily at 9 AM Vietnam time (UTC+7)
     - cron: '0 14 * * *'   # Run daily at 2 AM UTC
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   test:
@@ -44,13 +44,11 @@ jobs:
     - name: Install Chrome and ChromeDriver
       if: matrix.browser == 'chrome'
       run: |
-        # Install Chrome
         wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
         sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
 
-        # Install matching ChromeDriver
         CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
         CHROMEDRIVER_VERSION=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/latest-patch-versions-per-build-with-downloads.json" | jq -r ".builds.\"${CHROME_VERSION}\".version")
         wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip"
@@ -75,47 +73,31 @@ jobs:
           -v \
           --tb=short \
           --maxfail=5 \
-          -n auto \
           --html=reports/report_${timestamp}_${{ matrix.browser }}.html \
           --self-contained-html \
           --junit-xml=reports/junit_${timestamp}_${{ matrix.browser }}.xml
 
-    - name: Generate test summary
+    - name: Display test summary
       if: always()
       run: |
         echo "## Test Results - ${{ matrix.browser }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        if [ -f reports/junit_*.xml ]; then
-          echo "✅ Test execution completed" >> $GITHUB_STEP_SUMMARY
+        if [ -f reports/history/index.json ]; then
           python3 << 'EOF'
-import xml.etree.ElementTree as ET
-import glob
-
-# Find the latest junit xml file
-junit_files = glob.glob('reports/junit_*.xml')
-if junit_files:
-    junit_file = sorted(junit_files)[-1]
-    tree = ET.parse(junit_file)
-    root = tree.getroot()
-    
-    total = root.get('tests', '0')
-    failures = root.get('failures', '0')
-    errors = root.get('errors', '0')
-    skipped = root.get('skipped', '0')
-    passed = int(total) - int(failures) - int(errors) - int(skipped)
-    
-    print(f"- **Total Tests**: {total}", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-    print(f"- **Passed**: {passed} ✅", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-    print(f"- **Failed**: {failures} ❌", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-    print(f"- **Errors**: {errors} ⚠️", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-    print(f"- **Skipped**: {skipped} ⏭️", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-    
-    if int(total) > 0:
-      pass_rate = (passed / int(total)) * 100
-      print(f"- **Pass Rate**: {pass_rate:.2f}%", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+import json
+with open('reports/history/index.json') as f:
+    data = json.load(f)
+    if data:
+        run = data[0]
+        print(f"- **Total Tests**: {run['total']}", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f"- **Passed**: {run['passed']} ✅", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f"- **Failed**: {run['failed']} ❌", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f"- **Errors**: {run['error']} ⚠️", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f"- **Pass Rate**: {run['pass_rate']}%", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f"- **Duration**: {run['duration']}s", file=open('$GITHUB_STEP_SUMMARY', 'a'))
 EOF
         else
-          echo "⚠️ No test results found" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ No history file found" >> $GITHUB_STEP_SUMMARY
         fi
 
     - name: Upload test results
@@ -127,7 +109,6 @@ EOF
           reports/
           screenshots/
         retention-days: 30
-        if-no-files-found: warn
 
   notify:
     needs: test
@@ -140,5 +121,5 @@ EOF
           echo "❌ Tests failed!"
           exit 1
         else
-          echo "✅ Tests passed!"
+          echo "✅ All tests passed!"
         fi

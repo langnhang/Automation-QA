@@ -28,6 +28,14 @@ jobs:
         python-version: '3.11'
         cache: 'pip'
 
+    - name: Clean reports directory
+      run: |
+        rm -rf reports/
+        rm -rf screenshots/
+        rm -rf .pytest_cache
+        mkdir -p reports/
+        mkdir -p screenshots/
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -62,13 +70,53 @@ jobs:
         BROWSER: ${{ matrix.browser }}
         HEADLESS: true
       run: |
+        timestamp=$(date +%Y%m%d_%H%M%S)
         pytest tests/ \
           -v \
           --tb=short \
           --maxfail=5 \
           -n auto \
-          --html=reports/report_${{ matrix.browser }}.html \
-          --self-contained-html
+          --html=reports/report_${timestamp}_${{ matrix.browser }}.html \
+          --self-contained-html \
+          --junit-xml=reports/junit_${timestamp}_${{ matrix.browser }}.xml
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        echo "## Test Results - ${{ matrix.browser }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ -f reports/junit_*.xml ]; then
+          echo "✅ Test execution completed" >> $GITHUB_STEP_SUMMARY
+          python3 << 'EOF'
+import xml.etree.ElementTree as ET
+import glob
+
+# Find the latest junit xml file
+junit_files = glob.glob('reports/junit_*.xml')
+if junit_files:
+    junit_file = sorted(junit_files)[-1]
+    tree = ET.parse(junit_file)
+    root = tree.getroot()
+    
+    total = root.get('tests', '0')
+    failures = root.get('failures', '0')
+    errors = root.get('errors', '0')
+    skipped = root.get('skipped', '0')
+    passed = int(total) - int(failures) - int(errors) - int(skipped)
+    
+    print(f"- **Total Tests**: {total}", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+    print(f"- **Passed**: {passed} ✅", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+    print(f"- **Failed**: {failures} ❌", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+    print(f"- **Errors**: {errors} ⚠️", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+    print(f"- **Skipped**: {skipped} ⏭️", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+    
+    if int(total) > 0:
+      pass_rate = (passed / int(total)) * 100
+      print(f"- **Pass Rate**: {pass_rate:.2f}%", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+EOF
+        else
+          echo "⚠️ No test results found" >> $GITHUB_STEP_SUMMARY
+        fi
 
     - name: Upload test results
       if: always()
@@ -79,34 +127,7 @@ jobs:
           reports/
           screenshots/
         retention-days: 30
-
-    - name: Upload test report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: html-report-${{ matrix.browser }}
-        path: reports/*.html
-        retention-days: 30
-
-    - name: Publish test summary
-      if: always()
-      run: |
-        if [ -f reports/history/index.json ]; then
-          echo "## Test Results - ${{ matrix.browser }}" >> $GITHUB_STEP_SUMMARY
-          python -c "
-import json
-with open('reports/history/index.json') as f:
-    data = json.load(f)
-    if data:
-        run = data[0]
-        print(f\"- **Total**: {run['total']}\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f\"- **Passed**: {run['passed']} ✅\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f\"- **Failed**: {run['failed']} ❌\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f\"- **Errors**: {run['error']} ⚠️\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f\"- **Pass Rate**: {run['pass_rate']}%\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f\"- **Duration**: {run['duration']}s\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-          "
-        fi
+        if-no-files-found: warn
 
   notify:
     needs: test
@@ -116,8 +137,8 @@ with open('reports/history/index.json') as f:
     - name: Check test status
       run: |
         if [ "${{ needs.test.result }}" == "failure" ]; then
-          echo "Tests failed!"
+          echo "❌ Tests failed!"
           exit 1
         else
-          echo "Tests passed!"
+          echo "✅ Tests passed!"
         fi

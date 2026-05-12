@@ -7,8 +7,8 @@ on:
     branches: [ main, develop ]
   schedule:
     - cron: '0 2 * * *'  # Run daily at 9 AM Vietnam time (UTC+7)
-    - cron: '0 14 * * *'   # Run daily at 2 AM UTC
-  workflow_dispatch:
+    - cron: '0 14 * * *' 
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
   test:
@@ -28,14 +28,6 @@ jobs:
         python-version: '3.11'
         cache: 'pip'
 
-    - name: Clean reports directory
-      run: |
-        rm -rf reports/
-        rm -rf screenshots/
-        rm -rf .pytest_cache
-        mkdir -p reports/
-        mkdir -p screenshots/
-
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -44,11 +36,13 @@ jobs:
     - name: Install Chrome and ChromeDriver
       if: matrix.browser == 'chrome'
       run: |
+        # Install Chrome
         wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
         sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
 
+        # Install matching ChromeDriver
         CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
         CHROMEDRIVER_VERSION=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/latest-patch-versions-per-build-with-downloads.json" | jq -r ".builds.\"${CHROME_VERSION}\".version")
         wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip"
@@ -68,37 +62,13 @@ jobs:
         BROWSER: ${{ matrix.browser }}
         HEADLESS: true
       run: |
-        timestamp=$(date +%Y%m%d_%H%M%S)
         pytest tests/ \
           -v \
           --tb=short \
           --maxfail=5 \
-          --html=reports/report_${timestamp}_${{ matrix.browser }}.html \
-          --self-contained-html \
-          --junit-xml=reports/junit_${timestamp}_${{ matrix.browser }}.xml
-
-    - name: Display test summary
-      if: always()
-      run: |
-        echo "## Test Results - ${{ matrix.browser }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        if [ -f reports/history/index.json ]; then
-          python3 << 'EOF'
-import json
-with open('reports/history/index.json') as f:
-    data = json.load(f)
-    if data:
-        run = data[0]
-        print(f"- **Total Tests**: {run['total']}", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f"- **Passed**: {run['passed']} ✅", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f"- **Failed**: {run['failed']} ❌", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f"- **Errors**: {run['error']} ⚠️", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f"- **Pass Rate**: {run['pass_rate']}%", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-        print(f"- **Duration**: {run['duration']}s", file=open('$GITHUB_STEP_SUMMARY', 'a'))
-EOF
-        else
-          echo "⚠️ No history file found" >> $GITHUB_STEP_SUMMARY
-        fi
+          -n auto \
+          --html=reports/report_${{ matrix.browser }}.html \
+          --self-contained-html
 
     - name: Upload test results
       if: always()
@@ -110,6 +80,34 @@ EOF
           screenshots/
         retention-days: 30
 
+    - name: Upload test report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: html-report-${{ matrix.browser }}
+        path: reports/*.html
+        retention-days: 30
+
+    - name: Publish test summary
+      if: always()
+      run: |
+        if [ -f reports/history/index.json ]; then
+          echo "## Test Results - ${{ matrix.browser }}" >> $GITHUB_STEP_SUMMARY
+          python -c "
+import json
+with open('reports/history/index.json') as f:
+    data = json.load(f)
+    if data:
+        run = data[0]
+        print(f\"- **Total**: {run['total']}\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f\"- **Passed**: {run['passed']} ✅\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f\"- **Failed**: {run['failed']} ❌\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f\"- **Errors**: {run['error']} ⚠️\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f\"- **Pass Rate**: {run['pass_rate']}%\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+        print(f\"- **Duration**: {run['duration']}s\", file=open('$GITHUB_STEP_SUMMARY', 'a'))
+          "
+        fi
+
   notify:
     needs: test
     runs-on: ubuntu-latest
@@ -118,8 +116,8 @@ EOF
     - name: Check test status
       run: |
         if [ "${{ needs.test.result }}" == "failure" ]; then
-          echo "❌ Tests failed!"
+          echo "Tests failed!"
           exit 1
         else
-          echo "✅ All tests passed!"
+          echo "Tests passed!"
         fi

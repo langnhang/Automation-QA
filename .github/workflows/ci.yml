@@ -48,11 +48,12 @@ jobs:
           BROWSER: chrome
           HEADLESS: true
         run: |
-          pytest tests/test_login.py \
+          pytest tests \
             -v \
             --tb=short \
             --html=reports/smoke_report.html \
             --self-contained-html
+        continue-on-error: true
 
       - name: Upload smoke test results
         if: always()

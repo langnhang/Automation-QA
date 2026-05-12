@@ -93,23 +93,11 @@ class TestRegister:
         page.register("Test", "User", generate_email(), "123")
         assert page.is_visible(RegisterLocators.ERROR_MESSAGE)
 
-    # TC10: Đăng ký bỏ trống first name
+   # TC10: Đăng ký bỏ trống first name
     def test_register_empty_firstname(self, driver):
         page = RegisterPage(driver)
         page.open()
         page.register("", "User", generate_email(), "Test@12345")
-        assert page.is_visible(RegisterLocators.ERROR_MESSAGE)
-    # TC11: Fail do message sai
-def test_register_force_fail(self, driver):
-    page = RegisterPage(driver)
-    page.open()
-
-    page.register(
-        "Test",
-        "User",
-        generate_email(),
-        "Test@12345"
-    )
-
-    # Cố tình expected sai
-    assert "Register Failed" in page.get_success_message()
+    
+        # Fail cố ý
+        assert "Success" in page.get_success_message()

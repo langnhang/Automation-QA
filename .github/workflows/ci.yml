@@ -47,7 +47,7 @@ jobs:
         env:
           BROWSER: chrome
           HEADLESS: true
-        run: |
+       run: |
           pytest tests/test_login.py::TestRegister::test_register_empty_firstname \
             -v \
             --tb=short \

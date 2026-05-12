@@ -99,3 +99,17 @@ class TestRegister:
         page.open()
         page.register("", "User", generate_email(), "Test@12345")
         assert page.is_visible(RegisterLocators.ERROR_MESSAGE)
+    # TC11: Fail do message sai
+def test_register_force_fail(self, driver):
+    page = RegisterPage(driver)
+    page.open()
+
+    page.register(
+        "Test",
+        "User",
+        generate_email(),
+        "Test@12345"
+    )
+
+    # Cố tình expected sai
+    assert "Register Failed" in page.get_success_message()

@@ -49,7 +49,6 @@ jobs:
         HEADLESS: true
       run: |
         pytest tests/ -v \
-          -v \
           --tb=short \
           --html=reports/smoke_report.html \
           --self-contained-html

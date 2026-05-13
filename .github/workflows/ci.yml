@@ -48,7 +48,7 @@ jobs:
           BROWSER: chrome
           HEADLESS: true
         run: |
-          pytest tests/test_user_account.py \
+          pytest tests \
             -v \
             --tb=short \
             --html=reports/smoke_report.html \
